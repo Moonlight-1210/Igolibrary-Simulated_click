@@ -32,6 +32,15 @@
 - Google Chrome（Playwright 使用本机 Chrome）
 - （可选）`cloudflared.exe`：用于公网访问功能，放到 `bin/cloudflared.exe`，可从 Cloudflare 官方 GitHub Releases 下载
 
+## 下载即用（免安装版，推荐）
+
+不想安装 Node.js 环境？直接下载发布包：
+
+- **[seat-grabber-v1.0.0-win-x64.zip](https://github.com/huangzichen-Lemon/Igolibrary-Simulated_click/releases/download/v1.0.0/seat-grabber-v1.0.0-win-x64.zip)**（约 53 MB）
+- 解压后双击 `启动.bat` 即可运行（内置 Node.js，需要本机装有 Google Chrome）
+
+然后打开 http://127.0.0.1:7789
+
 ## 安装
 
 ```bash
