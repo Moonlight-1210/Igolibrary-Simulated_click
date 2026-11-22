@@ -39,7 +39,7 @@
 - **[seat-grabber-v1.0.0-win-x64.zip](https://github.com/huangzichen-Lemon/Igolibrary-Simulated_click/releases/download/v1.0.0/seat-grabber-v1.0.0-win-x64.zip)**（约 53 MB）
 - 解压后双击 `启动.bat` 即可运行（内置 Node.js，需要本机装有 Google Chrome）
 
-然后打开 http://127.0.0.1:7789
+启动后会自动打开浏览器控制台；若没有自动打开，手动访问 http://127.0.0.1:7789
 
 ## 安装
 
@@ -56,7 +56,7 @@ npm install playwright-core
 node server.js
 ```
 
-然后打开 http://127.0.0.1:7789
+启动后会自动打开浏览器控制台；若没有自动打开，手动访问 http://127.0.0.1:7789
 
 ## 使用
 
