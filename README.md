@@ -27,6 +27,14 @@
 
 ## 环境要求
 
+### 免安装版（推荐，见下方「下载即用」）
+
+- Windows 10/11
+- Google Chrome（程序使用本机 Chrome 打开官方网页）
+- 内置 Node.js 与 cloudflared，无需额外安装
+
+### 源码运行
+
 - Windows 10/11
 - Node.js 18+
 - Google Chrome（Playwright 使用本机 Chrome）
