@@ -15,6 +15,7 @@ const session = require('./session');
 const { SeatGrabber } = require('./grabber');
 const { cancelReservation } = require('./cancel');
 const tunnel = require('./tunnel');
+const { fetchDataViaBrowser } = require('./browser-data');
 const QRCode = require('qrcode');
 
 let relayState = null; // 扫码登录：{ token, status: 'waiting'|'ok'|'err', message, createdAt, mobileUrl }
@@ -34,14 +35,19 @@ let grabber = null;
 let lastSuccess = null;
 let dataCache = null; // { account, reserve, libs, fetchedAt }
 
-/** 从平台拉取账号/预约/场馆数据（只有登录、手动刷新、预约成功后会调用） */
+/** 用真实浏览器打开官方网页获取账号/预约/场馆数据（不直接调用平台接口） */
 async function refreshData() {
   const s = session.loadSession();
   if (!s) { dataCache = null; return null; }
-  const account = await session.fetchAccount(s.cookie);
-  const reserve = await session.fetchReserve(s.cookie);
-  const libs = await session.fetchLibs(s.cookie);
-  dataCache = { account, reserve, libs, fetchedAt: Date.now() };
+  const data = await fetchDataViaBrowser(path.join(__dirname, 'data', 'session.json'));
+  // 回填账号信息到会话
+  if (data.account) {
+    s.userId = data.account.userId;
+    s.nick = data.account.nick || s.nick || '';
+    s.school = data.account.school || s.school || '';
+    try { session.saveSession(s); } catch (e) { }
+  }
+  dataCache = { account: data.account, reserve: data.reserve, libs: data.libs, fetchedAt: Date.now() };
   return dataCache;
 }
 
@@ -205,7 +211,8 @@ async function apiStatus() {
       expireText = left > 0 ? `${Math.floor(left / 60000)} 分钟` : '已过期';
       if (left <= 0) loggedIn = false;
     }
-    if (!dataCache) { try { await refreshData(); } catch (e) { } }
+    // 注意：这里不自动查询平台。数据只在登录成功、手动「刷新数据」、抢座成功后
+    // 通过真实浏览器打开官方网页获取（见 refreshData）。
   }
   return {
     loggedIn, account,
