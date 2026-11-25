@@ -216,6 +216,7 @@ class GrabWorker:
         cache = None
         last_warn_ts = 0.0
         last_empty_shot_ts = 0.0
+        last_alert_beep_ts = 0.0
         prev_empty_count = 0
         consecutive_fails = 0
         round_no = 0
@@ -367,8 +368,10 @@ class GrabWorker:
                 prev_empty_count = len(empties)
 
                 if empties and mode == 'monitor':
-                    v2.beep(self.beep_enabled, 'alert')
                     now_ts = time.time()
+                    if now_ts - last_alert_beep_ts >= 3.0:
+                        v2.beep(self.beep_enabled, 'alert')
+                        last_alert_beep_ts = now_ts
                     if now_ts - last_empty_shot_ts >= 30.0:
                         shot_p = v2.save_shot(arr, 'v2-empty')
                         last_empty_shot_ts = now_ts

@@ -63,21 +63,22 @@ def log(msg):
 
 
 def beep(enabled, kind='alert'):
+    """Play a gentle Windows system chime without blocking or harsh square waves."""
     if not enabled:
         return
+    alias_map = {
+        'alert': ('SystemNotification', winsound.MB_ICONASTERISK),
+        'success': ('SystemAsterisk', winsound.MB_OK),
+        'warn': ('SystemExclamation', winsound.MB_ICONEXCLAMATION),
+    }
+    alias, mb_flag = alias_map.get(kind, ('SystemNotification', winsound.MB_OK))
     try:
-        if kind == 'alert':
-            winsound.Beep(1200, 220)
-        elif kind == 'success':
-            winsound.Beep(1046, 160)
-            winsound.Beep(1318, 160)
-            winsound.Beep(1568, 280)
-        elif kind == 'warn':
-            for _ in range(3):
-                winsound.Beep(520, 180)
-                time.sleep(0.06)
+        winsound.PlaySound(alias, winsound.SND_ALIAS | winsound.SND_ASYNC)
     except Exception:
-        pass
+        try:
+            winsound.MessageBeep(mb_flag)
+        except Exception:
+            pass
 
 
 def prune_old_shots(shots_dir=SHOTS_DIR, max_keep=MAX_SHOTS):
@@ -329,6 +330,7 @@ def main():
     cache = None
     last_warn_ts = 0.0
     last_empty_shot_ts = 0.0
+    last_alert_beep_ts = 0.0
     prev_empty_count = 0
     consecutive_fails = 0
     round_no = 0
@@ -442,8 +444,10 @@ def main():
             prev_empty_count = len(empties)
 
             if empties and args.mode == 'monitor':
-                beep(beep_on, 'alert')
                 now_ts = time.time()
+                if now_ts - last_alert_beep_ts >= 3.0:
+                    beep(beep_on, 'alert')
+                    last_alert_beep_ts = now_ts
                 if now_ts - last_empty_shot_ts >= 30.0:
                     shot_p = save_shot(arr, 'v2-empty')
                     last_empty_shot_ts = now_ts
