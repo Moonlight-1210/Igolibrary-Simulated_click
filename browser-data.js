@@ -1,12 +1,11 @@
 /**
  * 浏览器数据获取：
  * 用真实 Chrome 打开官方网页，由页面自己发出请求，程序只监听并解析页面响应。
- * （不直接调用平台接口；平台看到的是官方网页正常加载）
+ * 使用浏览器原生 UA（不伪造），并做基础反自动化特征处理。
  */
-const { chromium } = require('playwright-core');
 const fs = require('fs');
+const { launchBrowser, newStealthContext } = require('./browser-utils');
 
-const UA = 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36 NetType/WIFI MicroMessenger/7.0.20.1781(0x6700143B) WindowsWechat(0x63070626)';
 const WEB = 'https://web.traceint.com/web/index.html';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -44,15 +43,9 @@ async function fetchDataViaBrowser(sessionFile) {
     return { name: s.slice(0, i), value: s.slice(i + 1), domain: '.traceint.com', path: '/', secure: true };
   });
 
-  const browser = await chromium.launch({
-    channel: 'chrome', headless: true,
-    args: ['--no-proxy-server', '--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
-  });
+  const browser = await launchBrowser();
   try {
-    const context = await browser.newContext({
-      userAgent: UA, locale: 'zh-CN', ignoreHTTPSErrors: true,
-      viewport: { width: 430, height: 932 }, deviceScaleFactor: 2,
-    });
+    const context = await newStealthContext(browser);
     await context.addCookies(cookies);
     const page = await context.newPage();
 
@@ -65,7 +58,6 @@ async function fetchDataViaBrowser(sessionFile) {
         const ua = j && j.data && j.data.userAuth;
         if (!ua) return;
 
-        // index 查询：账号信息 + 当前预约
         if (post.includes('"operationName":"index"') || ua.currentUser) {
           if (ua.currentUser && !collected.account) {
             collected.account = {
@@ -79,7 +71,6 @@ async function fetchDataViaBrowser(sessionFile) {
             collected.reserve = normalizeReserve(ua.reserve.reserve);
           }
         }
-        // list 查询：场馆列表
         if (post.includes('"operationName":"list"') && ua.reserve && ua.reserve.libs && !collected.libs) {
           collected.libs = normalizeLibs(ua.reserve.libs);
         }
@@ -87,12 +78,9 @@ async function fetchDataViaBrowser(sessionFile) {
     });
 
     await page.goto(WEB, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-    // 等待页面自动请求返回（最多 20 秒）
     let waited = 0;
     while (!collected.account && waited < 20000) { await sleep(300); waited += 300; }
 
-    // 还没拿到账号？点击"我的"让页面重新请求
     if (!collected.account) {
       try {
         const mine = page.getByText('我的', { exact: true }).first();
@@ -102,7 +90,6 @@ async function fetchDataViaBrowser(sessionFile) {
       while (!collected.account && waited < 10000) { await sleep(300); waited += 300; }
     }
 
-    // 进入选座页，让页面请求场馆列表（list）
     if (!collected.libs) {
       try {
         const go = page.getByText('去选座', { exact: true }).first();
@@ -126,7 +113,7 @@ async function fetchDataViaBrowser(sessionFile) {
       libs: collected.libs || [],
     };
   } finally {
-    await browser.close();
+    await browser.close().catch(() => { });
   }
 }
 

@@ -1,12 +1,14 @@
 /**
  * 网页点击抢座核心（真实 Chrome + 官方网页 + 真实点击）
+ * - 浏览器使用原生 UA（不伪造），并做基础反自动化特征处理
+ * - 流程模拟真人：首页 → 选座页 → 座位图 → 循环刷新
  * 事件：log / status / success / stopped
  */
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
+const { launchBrowser, newStealthContext } = require('./browser-utils');
 
-const UA = 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36 NetType/WIFI MicroMessenger/7.0.20.1781(0x6700143B) WindowsWechat(0x63070626)';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const rand = (a, b) => a + Math.random() * (b - a);
 
@@ -34,12 +36,10 @@ class SeatGrabber extends EventEmitter {
     this.round = 0;
     let session;
     try { session = JSON.parse(fs.readFileSync(this.opts.sessionFile, 'utf8')); } catch (e) { throw new Error('没有登录态，请先登录'); }
-    const cookie = session.cookie;
-    const cookies = cookie.split('; ').map(s => { const i = s.indexOf('='); return { name: s.slice(0, i), value: s.slice(i + 1), domain: '.traceint.com', path: '/', secure: true }; });
+    const cookies = session.cookie.split('; ').map(s => { const i = s.indexOf('='); return { name: s.slice(0, i), value: s.slice(i + 1), domain: '.traceint.com', path: '/', secure: true }; });
 
-    const { chromium } = require('playwright-core');
-    this.browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--no-proxy-server', '--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'] });
-    const context = await this.browser.newContext({ userAgent: UA, locale: 'zh-CN', ignoreHTTPSErrors: true, viewport: { width: 430, height: 932 }, deviceScaleFactor: 2 });
+    this.browser = await launchBrowser();
+    const context = await newStealthContext(this.browser);
     await context.addCookies(cookies);
     this.context = context;
     const page = await context.newPage();
@@ -47,6 +47,7 @@ class SeatGrabber extends EventEmitter {
 
     let lastLayout = null, stopFlag = false, currentSeat = '';
     const seatCooldown = new Map();
+    const seatMapUrl = `https://web.traceint.com/web/index.html#/pages/reserve/seatMap?libId=${this.opts.libId}&recordUser=null`;
 
     page.on('response', async (resp) => {
       try {
@@ -79,10 +80,24 @@ class SeatGrabber extends EventEmitter {
       } catch (e) { }
     });
 
-    const url = `https://web.traceint.com/web/index.html#/pages/reserve/seatMap?libId=${this.opts.libId}&recordUser=null`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(5000);
-    this.log(`已打开页面（场馆 ${this.opts.libId}，模式 ${this.opts.mode}，间隔 ${this.opts.minSec}~${this.opts.maxSec} 秒）`);
+    // 模拟真人进入流程：打开首页 → 点「去选座」→ 进入座位图
+    await page.goto('https://web.traceint.com/web/index.html', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(rand(2000, 4000));
+    let entered = false;
+    try {
+      const go = page.getByText('去选座', { exact: true }).first();
+      if (await go.count()) { await go.click({ timeout: 8000 }); entered = true; }
+    } catch (e) { }
+    if (!entered) {
+      try {
+        const tab = page.getByText('选座', { exact: true }).first();
+        if (await tab.count()) { await tab.click({ timeout: 8000 }); entered = true; }
+      } catch (e) { }
+    }
+    await page.waitForTimeout(rand(1500, 3000));
+    await page.goto(seatMapUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+    await page.waitForTimeout(rand(3000, 5000));
+    this.log(`已进入座位图（流程：首页 → 选座 → 座位图；场馆 ${this.opts.libId}，模式 ${this.opts.mode}，间隔 ${this.opts.minSec}~${this.opts.maxSec} 秒）`);
     this.emit('status', { running: true });
 
     const startedAt = Date.now();
@@ -131,14 +146,12 @@ class SeatGrabber extends EventEmitter {
         } catch (e) { this.log('点击确认失败: ' + e.message.split('\n')[0]); }
         await sleep(2500);
         if (!stopFlag) {
-          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+          await page.goto(seatMapUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
           await sleep(800);
         }
       }
 
-      const extra = (this.round % 30 === 0) ? rand(8, 15) : 0;
-      if (extra > 0) this.log(`第 ${this.round} 轮后休息 ${extra.toFixed(0)} 秒`);
-      await sleep((rand(this.opts.minSec, this.opts.maxSec) + extra) * 1000);
+      await sleep(rand(this.opts.minSec, this.opts.maxSec) * 1000);
     }
 
     this.running = false;

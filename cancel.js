@@ -1,21 +1,20 @@
 /**
  * 纯点击取消预约：
  * 打开官方首页 → 找到当前预约卡片 → 点「取消预定」→ 弹窗点「确定」→ 验证
+ * 使用浏览器原生 UA（不伪造）+ 反自动化特征处理
  */
-const { chromium } = require('playwright-core');
 const fs = require('fs');
+const { launchBrowser, newStealthContext } = require('./browser-utils');
 
-const UA = 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36 NetType/WIFI MicroMessenger/7.0.20.1781(0x6700143B) WindowsWechat(0x63070626)';
-
-async function cancelReservation({ sessionFile, headless = true }) {
+async function cancelReservation({ sessionFile }) {
   const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
   const cookies = session.cookie.split('; ').map(s => {
     const i = s.indexOf('=');
     return { name: s.slice(0, i), value: s.slice(i + 1), domain: '.traceint.com', path: '/', secure: true };
   });
-  const browser = await chromium.launch({ channel: 'chrome', headless, args: ['--no-proxy-server', '--ignore-certificate-errors'] });
+  const browser = await launchBrowser();
   try {
-    const context = await browser.newContext({ userAgent: UA, locale: 'zh-CN', ignoreHTTPSErrors: true, viewport: { width: 430, height: 932 }, deviceScaleFactor: 2 });
+    const context = await newStealthContext(browser);
     await context.addCookies(cookies);
     const page = await context.newPage();
     await page.goto('https://web.traceint.com/web/index.html', { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -41,7 +40,7 @@ async function cancelReservation({ sessionFile, headless = true }) {
     const done = /您还没有选座哦|暂无预约/.test(text) || !/取消预定/.test(text);
     return { ok: done, message: done ? '已取消预约' : '取消操作已执行，页面状态未确认，请刷新查看' };
   } finally {
-    await browser.close();
+    await browser.close().catch(() => { });
   }
 }
 
