@@ -45,7 +45,7 @@
 
 不想安装 Node.js 环境？直接下载发布包：
 
-- **[seat-grabber-v1.0.1-win-x64.zip](https://github.com/Moonlight-1210/Igolibrary-Simulated_click/releases/download/v1.0.1/seat-grabber-v1.0.1-win-x64.zip)**（约 53 MB）
+- **[seat-grabber-v1.0.2-win-x64.zip](https://github.com/Moonlight-1210/Igolibrary-Simulated_click/releases/download/v1.0.2/seat-grabber-v1.0.2-win-x64.zip)**（约 53 MB）
 - 解压后双击 `启动.bat` 即可运行（内置 Node.js，需要本机装有 Google Chrome）
 
 启动后会自动打开浏览器控制台；若没有自动打开，手动访问 http://127.0.0.1:7789
