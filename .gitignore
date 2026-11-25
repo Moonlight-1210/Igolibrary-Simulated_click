@@ -4,3 +4,9 @@ bin/
 data/
 *.log
 *.tmp
+__pycache__/
+*.pyc
+v2-wechat/shots/
+v2-wechat/gui_config.json
+v2-wechat/test_click_result.txt
+v2-wechat/probe_*
