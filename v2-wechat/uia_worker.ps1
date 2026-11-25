@@ -74,7 +74,7 @@ function Handle-Scan([long]$hwnd, [bool]$textsOnly) {
         $stack = New-Object System.Collections.Stack
         $stack.Push(@{ Node = $root; Depth = 0 })
         $visited = 0
-        $maxNodes = 1500
+        $maxNodes = 3500
         $maxDepth = 20
 
         while ($stack.Count -gt 0 -and $visited -lt $maxNodes) {
@@ -105,10 +105,10 @@ function Handle-Scan([long]$hwnd, [bool]$textsOnly) {
                     $skipChildren = $true
                 } elseif ($name -ne '') {
                     $isSeatLabel = $false
-                    if ($ctype -eq 'Text' -and $name -match '^\d{2,4}$' -and $null -ne $rectArr) {
+                    if ($ctype -eq 'Text' -and $name -match '^([A-Za-z]{0,2}-?\d{1,4}[A-Za-z]?|[A-Za-z]?\d{1,3}-[A-Za-z0-9]{1,4})$' -and $null -ne $rectArr) {
                         $w = $rectArr[2] - $rectArr[0]
                         $h = $rectArr[3] - $rectArr[1]
-                        if ($w -gt 0 -and $w -le 40 -and $h -gt 0 -and $h -le 25) {
+                        if ($w -gt 0 -and $w -le 55 -and $h -gt 0 -and $h -le 28) {
                             $isSeatLabel = $true
                         }
                     }
@@ -131,7 +131,7 @@ function Handle-Scan([long]$hwnd, [bool]$textsOnly) {
                     while ($null -ne $ch) {
                         [void]$children.Add($ch)
                         $ch = $controlWalker.GetNextSibling($ch)
-                        if ($children.Count -ge 400) { break }
+                        if ($children.Count -ge 800) { break }
                     }
                 } catch {
                 }
@@ -166,7 +166,7 @@ function Handle-Invoke([long]$hwnd, [string]$targetName, [bool]$seatOnly) {
         $stack = New-Object System.Collections.Stack
         $stack.Push(@{ Node = $root; Depth = 0 })
         $visited = 0
-        $maxNodes = 1500
+        $maxNodes = 3500
         $maxDepth = 20
 
         while ($stack.Count -gt 0 -and $visited -lt $maxNodes) {
@@ -201,7 +201,7 @@ function Handle-Invoke([long]$hwnd, [string]$targetName, [bool]$seatOnly) {
                     while ($null -ne $ch) {
                         [void]$children.Add($ch)
                         $ch = $controlWalker.GetNextSibling($ch)
-                        if ($children.Count -ge 400) { break }
+                        if ($children.Count -ge 800) { break }
                     }
                 } catch {
                 }

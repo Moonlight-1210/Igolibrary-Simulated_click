@@ -19,11 +19,16 @@ import winsound
 
 from PIL import Image
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+if getattr(sys, 'frozen', False):
+    _HERE = os.path.dirname(sys.executable)
+else:
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 import win_backend as wb
+
+BASE_DIR = wb.BASE_DIR
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')

@@ -6,6 +6,7 @@ import os
 import queue
 import random
 import subprocess
+import sys
 import threading
 import time
 
@@ -130,7 +131,12 @@ class BITMAPINFOHEADER(ctypes.Structure):
     ]
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+    RES_DIR = getattr(sys, '_MEIPASS', BASE_DIR)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    RES_DIR = BASE_DIR
 
 
 def get_class(hwnd):
@@ -192,7 +198,7 @@ def collect_wechat_pids():
             parts = [p.strip('"') for p in line.split('","')]
             if len(parts) >= 2:
                 proc_name = parts[0].strip('"')
-                if proc_name.lower() in ('weixin.exe', 'wechatappex.exe'):
+                if proc_name.lower() in ('weixin.exe', 'wechat.exe', 'wechatappex.exe'):
                     try:
                         pids[int(parts[1])] = proc_name
                     except ValueError:
@@ -204,7 +210,7 @@ def collect_wechat_pids():
 
 def find_wechat_windows():
     """Discover WeChat browser_hwnd (visible Chrome_WidgetWin_*) and render_hwnd."""
-    main_hwnd = user32.FindWindowW(None, '微信')
+    main_hwnd = user32.FindWindowW(None, '微信') or user32.FindWindowW('WeChatMainWndForPC', None)
     pid_map = collect_wechat_pids()
     if main_hwnd:
         mpid = get_pid(main_hwnd)
@@ -441,6 +447,7 @@ def classify_seat_patch(img, cx, cy):
     orange = int(((R > 210) & (G > 130) & (G < 200) & (B < 120)).sum())
     gray = int(((np.abs(R - G) < 15) & (np.abs(G - B) < 15) & (R > 180) & (R < 238)).sum())
 
+    total = float(patch.shape[0] * patch.shape[1])
     scores = {
         'selected': green,
         'supervise': orange,
@@ -448,12 +455,12 @@ def classify_seat_patch(img, cx, cy):
         'away': gray,
     }
     best_state, best_score = max(scores.items(), key=lambda kv: kv[1])
-    if best_score >= 40:
+    if best_score >= max(24, int(total * 0.20)):
         return best_state
 
     white = int(((R > 225) & (G > 225) & (B > 225)).sum())
     dark = int(((R < 130) & (G < 130) & (B < 130)).sum())
-    if dark < 25 and white >= 100:
+    if (dark / total) < 0.13 and (white / total) >= 0.45:
         return 'empty'
     return 'unknown'
 
@@ -485,7 +492,12 @@ class UiaClient:
     """Persistent PowerShell UIA worker client over UTF-8/ASCII JSON lines."""
 
     def __init__(self, worker_path=None):
-        self.worker_path = worker_path or os.path.join(BASE_DIR, 'uia_worker.ps1')
+        if worker_path:
+            self.worker_path = worker_path
+        else:
+            p_base = os.path.join(BASE_DIR, 'uia_worker.ps1')
+            p_res = os.path.join(RES_DIR, 'uia_worker.ps1')
+            self.worker_path = p_base if os.path.exists(p_base) else p_res
         self._proc = None
         self._queue = None
         self._reader_thread = None

@@ -15,13 +15,18 @@ from tkinter import messagebox, scrolledtext, ttk
 
 from PIL import Image, ImageDraw, ImageTk
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+if getattr(sys, 'frozen', False):
+    _HERE = os.path.dirname(sys.executable)
+else:
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 # Import win_backend before Tk() so SetProcessDPIAware() activates first.
 import win_backend as wb
 import wechat_grab_v2 as v2
+
+BASE_DIR = wb.BASE_DIR
 
 if sys.stdout is not None:
     try:
