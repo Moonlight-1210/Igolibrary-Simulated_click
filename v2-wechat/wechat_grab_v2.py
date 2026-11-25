@@ -278,8 +278,14 @@ def wait_after_refresh(browser_hwnd, seats_rel, expected_size):
             # Timed out while loading overlay is still up: never emit false empties
             counts['empty'] = 0
             return arr, cur_rect, counts, []
-        colored = counts['occupied'] + counts['selected'] + counts['away'] + counts['supervise']
-        if (counts.get('unknown', 0) > 0 or (len(seats_rel) >= 30 and colored < 20)) and time.time() < deadline:
+        colored = (
+            counts['occupied']
+            + counts['selected']
+            + counts.get('picked', 0)
+            + counts['away']
+            + counts['supervise']
+        )
+        if (len(seats_rel) >= 30 and colored < 20) and time.time() < deadline:
             time.sleep(0.06)
             continue
         return arr, cur_rect, counts, empties
@@ -428,7 +434,7 @@ def main():
             empty_preview = f' 编号={empties[:6]}' if empties else ''
             log(
                 f'[第{round_no}轮 {elapsed_ms}ms] '
-                f'占用={counts["occupied"]} 已选={counts["selected"]} '
+                f'占用={counts["occupied"]} 已选={counts["selected"] + counts.get("picked", 0)} '
                 f'暂离={counts["away"]} 监督={counts["supervise"]} 空座={counts["empty"]}{empty_preview}'
             )
 
@@ -476,9 +482,9 @@ def main():
 
                 click_seat(uia, browser_hwnd, render_hwnd, cur_rect, cache, target, args.click_method)
 
-                # Poll up to 1.2s at 60ms intervals to verify target turned green
+                # Poll up to 1.2s at 60ms intervals to verify target was selected (blue picked or green selected)
                 seat_entry = next((s for s in cache['seats_rel'] if s['id'] == target), None)
-                turned_green = False
+                selected_ok = False
                 poll_arr = None
                 deadline = time.time() + 1.2
                 while time.time() < deadline and seat_entry:
@@ -486,23 +492,27 @@ def main():
                     poll_arr, poll_rect, _ = wb.capture_browser(browser_hwnd)
                     if not wb.is_frame_blank(poll_arr):
                         st = wb.classify_seat_patch(poll_arr, seat_entry['cx'], seat_entry['cy'])
-                        if st == 'selected':
-                            turned_green = True
+                        if st in ('picked', 'selected'):
+                            selected_ok = True
                             break
 
-                if not turned_green:
-                    shot_ng = save_shot(poll_arr if not wb.is_frame_blank(poll_arr) else arr, 'v2-notgreen', target)
+                if not selected_ok:
                     texts, has_risk, has_success, on_seatmap = inspect_texts_status(uia, render_hwnd)
-                    log(f'  -> [未变绿] 座位 {target} 未变绿 (截图 {shot_ng}) texts={texts[:8]}')
-                    if has_risk:
-                        log('[熔断] 检测到风控/异常提示，立即停止！')
-                        beep(beep_on, 'warn')
-                        break
-                    if has_success or not on_seatmap:
-                        log('[熔断] 页面已跳转或完成，停止。')
-                        beep(beep_on, 'success' if has_success else 'warn')
-                        break
-                else:
+                    if f'{target}号' in texts:
+                        selected_ok = True
+                    else:
+                        shot_ng = save_shot(poll_arr if not wb.is_frame_blank(poll_arr) else arr, 'v2-notgreen', target)
+                        log(f'  -> [未选中] 座位 {target} 未选中 (截图 {shot_ng}) texts={texts[:8]}')
+                        if has_risk:
+                            log('[熔断] 检测到风控/异常提示，立即停止！')
+                            beep(beep_on, 'warn')
+                            break
+                        if has_success or not on_seatmap:
+                            log('[熔断] 页面已跳转或完成，停止。')
+                            beep(beep_on, 'success' if has_success else 'warn')
+                            break
+
+                if selected_ok:
                     time.sleep(random.uniform(0.05, 0.12))
                     if not cache.get('confirm_rel'):
                         new_cache, _ = scan_and_build_cache(uia, render_hwnd, cur_rect)
@@ -519,7 +529,7 @@ def main():
                         args.click_method,
                         jitter=3,
                     )
-                    log(f'  -> [已确认] 座位 {target} 已变绿并点击「确认选座」，等待结果...')
+                    log(f'  -> [已确认] 座位 {target} 已选中并点击「确认选座」，等待结果...')
                     time.sleep(1.8)
 
                     after_arr, _, _ = wb.capture_browser(browser_hwnd)

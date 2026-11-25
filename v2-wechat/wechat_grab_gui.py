@@ -348,7 +348,7 @@ class GrabWorker:
                 empty_preview = f' 编号={empties[:6]}' if empties else ''
                 self._log(
                     f'[第{round_no}轮 {elapsed_ms}ms] '
-                    f'占用={counts["occupied"]} 已选={counts["selected"]} '
+                    f'占用={counts["occupied"]} 已选={counts["selected"] + counts.get("picked", 0)} '
                     f'暂离={counts["away"]} 监督={counts["supervise"]} 空座={counts["empty"]}{empty_preview}',
                     'empty' if empties else 'info',
                 )
@@ -402,7 +402,7 @@ class GrabWorker:
                     v2.click_seat(uia, browser_hwnd, render_hwnd, cur_rect, cache, target, click_method)
 
                     seat_entry = next((s for s in cache['seats_rel'] if s['id'] == target), None)
-                    turned_green = False
+                    selected_ok = False
                     poll_arr = None
                     deadline = time.time() + 1.2
                     while time.time() < deadline and seat_entry and not self._stop_event.is_set():
@@ -410,28 +410,32 @@ class GrabWorker:
                         poll_arr, _, _ = wb.capture_browser(browser_hwnd)
                         if not wb.is_frame_blank(poll_arr):
                             st = wb.classify_seat_patch(poll_arr, seat_entry['cx'], seat_entry['cy'])
-                            if st == 'selected':
-                                turned_green = True
+                            if st in ('picked', 'selected'):
+                                selected_ok = True
                                 break
 
                     if self._stop_event.is_set():
                         break
 
-                    if not turned_green:
-                        shot_ng = v2.save_shot(poll_arr if not wb.is_frame_blank(poll_arr) else arr, 'v2-notgreen', target)
+                    if not selected_ok:
                         texts, has_risk, has_success, on_seatmap = v2.inspect_texts_status(uia, render_hwnd)
-                        self._log(f'  -> [未变绿] 座位 {target} 未变绿 (截图 {shot_ng}) texts={texts[:8]}', 'warn')
-                        if has_risk:
-                            self._log('[熔断] 检测到风控/异常提示，立即停止！', 'error')
-                            v2.beep(self.beep_enabled, 'warn')
-                            finish_key, finish_text = 'stopped_risk', '已熔断停止'
-                            break
-                        if has_success or not on_seatmap:
-                            self._log('[成功/跳转] 页面已跳转或完成，停止。', 'success')
-                            v2.beep(self.beep_enabled, 'success' if has_success else 'warn')
-                            finish_key, finish_text = 'stopped_success', '选座成功'
-                            break
-                    else:
+                        if f'{target}号' in texts:
+                            selected_ok = True
+                        else:
+                            shot_ng = v2.save_shot(poll_arr if not wb.is_frame_blank(poll_arr) else arr, 'v2-notgreen', target)
+                            self._log(f'  -> [未选中] 座位 {target} 未选中 (截图 {shot_ng}) texts={texts[:8]}', 'warn')
+                            if has_risk:
+                                self._log('[熔断] 检测到风控/异常提示，立即停止！', 'error')
+                                v2.beep(self.beep_enabled, 'warn')
+                                finish_key, finish_text = 'stopped_risk', '已熔断停止'
+                                break
+                            if has_success or not on_seatmap:
+                                self._log('[成功/跳转] 页面已跳转或完成，停止。', 'success')
+                                v2.beep(self.beep_enabled, 'success' if has_success else 'warn')
+                                finish_key, finish_text = 'stopped_success', '选座成功'
+                                break
+
+                    if selected_ok:
                         if not self._sleep(random.uniform(0.05, 0.12), respect_pause=False):
                             break
                         if not cache.get('confirm_rel'):
@@ -449,7 +453,7 @@ class GrabWorker:
                             click_method,
                             jitter=3,
                         )
-                        self._log(f'  -> [已确认] 座位 {target} 已变绿并点击「确认选座」，等待结果...', 'empty')
+                        self._log(f'  -> [已确认] 座位 {target} 已选中并点击「确认选座」，等待结果...', 'empty')
                         if not self._sleep(1.8, respect_pause=False):
                             break
 
@@ -1172,7 +1176,8 @@ class GrabberGUI:
             elif kind == 'stats':
                 round_no, elapsed_ms, counts, empties = item[1], item[2], item[3], item[4]
                 for k, lbl in self.stat_labels.items():
-                    lbl.configure(text=str(counts.get(k, 0)))
+                    val = (counts.get('selected', 0) + counts.get('picked', 0)) if k == 'selected' else counts.get(k, 0)
+                    lbl.configure(text=str(val))
                 empty_txt = ', '.join(empties[:8]) if empties else '无'
                 if len(empties) > 8:
                     empty_txt += f' ...(+{len(empties) - 8})'

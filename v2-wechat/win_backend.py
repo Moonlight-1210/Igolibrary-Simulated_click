@@ -444,23 +444,25 @@ def classify_seat_patch(img, cx, cy):
     R, G, B = patch[:, :, 0], patch[:, :, 1], patch[:, :, 2]
     red = int(((R > 190) & (G < 150) & (B < 160)).sum())
     green = int(((G > 140) & (R < 150) & (B < 150)).sum())
+    blue = int(((B > 180) & ((B - R) > 40) & (R < 170)).sum())
     orange = int(((R > 210) & (G > 130) & (G < 200) & (B < 120)).sum())
     gray = int(((np.abs(R - G) < 15) & (np.abs(G - B) < 15) & (R > 180) & (R < 238)).sum())
 
     total = float(patch.shape[0] * patch.shape[1])
-    scores = {
-        'selected': green,
-        'supervise': orange,
-        'occupied': red,
-        'away': gray,
-    }
-    best_state, best_score = max(scores.items(), key=lambda kv: kv[1])
-    if best_score >= max(24, int(total * 0.20)):
-        return best_state
+    thresh_color = max(24, int(total * 0.20))
+    thresh_gray = max(45, int(total * 0.35))
+    candidates = []
+    for st, sc in (('picked', blue), ('selected', green), ('supervise', orange), ('occupied', red)):
+        if sc >= thresh_color:
+            candidates.append((sc, st))
+    if gray >= thresh_gray:
+        candidates.append((gray, 'away'))
+    if candidates:
+        return max(candidates)[1]
 
     white = int(((R > 225) & (G > 225) & (B > 225)).sum())
     dark = int(((R < 130) & (G < 130) & (B < 130)).sum())
-    if (dark / total) < 0.13 and (white / total) >= 0.45:
+    if (dark / total) < 0.30 and (white / total) >= 0.45:
         return 'empty'
     return 'unknown'
 
@@ -469,7 +471,7 @@ def classify_all_seats(img, browser_rect, seats):
     """Classify all seats using cached browser-relative or screen-coord centers."""
     bx, by = int(browser_rect[0]), int(browser_rect[1])
     states = {}
-    counts = {'occupied': 0, 'selected': 0, 'supervise': 0, 'away': 0, 'empty': 0, 'unknown': 0}
+    counts = {'occupied': 0, 'selected': 0, 'picked': 0, 'supervise': 0, 'away': 0, 'empty': 0, 'unknown': 0}
     empties = []
 
     for seat in seats:
