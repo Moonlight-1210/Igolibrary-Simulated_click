@@ -42,6 +42,7 @@ wb.user32.GetAsyncKeyState.restype = ctypes.c_short
 
 LOG_PATH = os.path.join(BASE_DIR, 'grab_v2.log')
 SHOTS_DIR = os.path.join(BASE_DIR, 'shots')
+MAX_SHOTS = 20
 os.makedirs(SHOTS_DIR, exist_ok=True)
 
 RISK_KEYWORDS = ('异常', '拦截', '封', '黑名单', '登录', '频繁', '限制', '违规')
@@ -79,12 +80,33 @@ def beep(enabled, kind='alert'):
         pass
 
 
+def prune_old_shots(shots_dir=SHOTS_DIR, max_keep=MAX_SHOTS):
+    """Keep at most the newest max_keep v2-*.png files in shots_dir."""
+    try:
+        files = [
+            os.path.join(shots_dir, fn)
+            for fn in os.listdir(shots_dir)
+            if fn.startswith('v2-') and fn.endswith('.png')
+        ]
+        if len(files) <= max_keep:
+            return
+        files.sort(key=lambda p: (os.path.getmtime(p), p), reverse=True)
+        for old_p in files[max_keep:]:
+            try:
+                os.remove(old_p)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def save_shot(arr, prefix, seat=''):
     ts = time.strftime('%H%M%S')
     tag = f'{prefix}-{seat}-{ts}.png' if seat else f'{prefix}-{ts}.png'
     path = os.path.join(SHOTS_DIR, tag)
     try:
         Image.fromarray(arr, mode='RGB').save(path)
+        prune_old_shots()
         return os.path.join('shots', tag)
     except Exception:
         return ''
@@ -306,6 +328,7 @@ def main():
     uia = wb.UiaClient()
     cache = None
     last_warn_ts = 0.0
+    last_empty_shot_ts = 0.0
     prev_empty_count = 0
     consecutive_fails = 0
     round_no = 0
@@ -420,8 +443,13 @@ def main():
 
             if empties and args.mode == 'monitor':
                 beep(beep_on, 'alert')
-                shot_p = save_shot(arr, 'v2-empty')
-                log(f'  [发现空座] {empties} (截图 {shot_p})')
+                now_ts = time.time()
+                if now_ts - last_empty_shot_ts >= 30.0:
+                    shot_p = save_shot(arr, 'v2-empty')
+                    last_empty_shot_ts = now_ts
+                    log(f'  [发现空座] {empties} (截图 {shot_p})')
+                else:
+                    log(f'  [发现空座] {empties}')
 
             elif empties and args.mode == 'live':
                 time.sleep(0.08)

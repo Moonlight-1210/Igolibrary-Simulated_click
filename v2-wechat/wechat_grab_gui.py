@@ -215,6 +215,7 @@ class GrabWorker:
         uia = None
         cache = None
         last_warn_ts = 0.0
+        last_empty_shot_ts = 0.0
         prev_empty_count = 0
         consecutive_fails = 0
         round_no = 0
@@ -367,8 +368,13 @@ class GrabWorker:
 
                 if empties and mode == 'monitor':
                     v2.beep(self.beep_enabled, 'alert')
-                    shot_p = v2.save_shot(arr, 'v2-empty')
-                    self._log(f'  [发现空座] {empties} (截图 {shot_p})', 'empty')
+                    now_ts = time.time()
+                    if now_ts - last_empty_shot_ts >= 30.0:
+                        shot_p = v2.save_shot(arr, 'v2-empty')
+                        last_empty_shot_ts = now_ts
+                        self._log(f'  [发现空座] {empties} (截图 {shot_p})', 'empty')
+                    else:
+                        self._log(f'  [发现空座] {empties}', 'empty')
 
                 elif empties and mode == 'live':
                     if not self._sleep(0.08, respect_pause=False):
