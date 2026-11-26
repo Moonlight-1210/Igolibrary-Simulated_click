@@ -45,8 +45,34 @@ SHOTS_DIR = os.path.join(BASE_DIR, 'shots')
 MAX_SHOTS = 20
 os.makedirs(SHOTS_DIR, exist_ok=True)
 
-RISK_KEYWORDS = ('异常', '拦截', '封', '黑名单', '登录', '频繁', '限制', '违规')
-SUCCESS_KEYWORDS = ('成功', '已预约', '签到', '预约成功')
+RISK_KEYWORDS = (
+    '访问行为异常',
+    '请求已拦截',
+    '行为异常',
+    '黑名单',
+    '封禁',
+    '已封',
+    '禁止预约',
+    '操作过于频繁',
+    '请求过于频繁',
+    '访问频繁',
+    '重新登录',
+    '登录已过期',
+    '登录失效',
+    '请先登录',
+    '违规',
+)
+SUCCESS_KEYWORDS = (
+    '自主扫码签到',
+    '扫码签到',
+    '签到帮助',
+    '二维码签到',
+    '蓝牙签到',
+    '应急码签到',
+    '选座成功',
+    '预约成功',
+    '已预约',
+)
 
 paused = False
 _key_state = {VK_F9: False, VK_F10: False}
@@ -240,15 +266,20 @@ def click_seat(uia, browser_hwnd, render_hwnd, browser_rect, cache, seat_id, met
     )
 
 
+def classify_texts_list(text_list):
+    joined = ' | '.join(text_list)
+    has_success = any(k in joined for k in SUCCESS_KEYWORDS)
+    has_risk = any(k in joined for k in RISK_KEYWORDS)
+    on_seatmap = ('刷新' in text_list) or ('确认选座' in text_list) or ('请选择座位' in text_list)
+    return has_risk, has_success, on_seatmap
+
+
 def inspect_texts_status(uia, render_hwnd):
     res = uia.get_texts(render_hwnd)
     if not res.get('ok'):
         return [], False, False, False
     text_list = [t.get('text', '') for t in (res.get('texts') or []) if t.get('text')]
-    joined = ' | '.join(text_list)
-    has_risk = any(k in joined for k in RISK_KEYWORDS)
-    has_success = any(k in joined for k in SUCCESS_KEYWORDS)
-    on_seatmap = ('刷新' in text_list) or ('确认选座' in text_list) or ('请选择座位' in text_list)
+    has_risk, has_success, on_seatmap = classify_texts_list(text_list)
     return text_list, has_risk, has_success, on_seatmap
 
 
@@ -441,10 +472,20 @@ def main():
             # Anti-false-positive check when empty count spikes abruptly
             if len(empties) >= 25 and prev_empty_count < 5:
                 texts, has_risk, has_success, on_seatmap = inspect_texts_status(uia, render_hwnd)
-                if has_risk or has_success or not on_seatmap:
+                if has_success:
                     shot_p = save_shot(arr, 'v2-spike')
-                    log(f'[熔断] 页面状态变化或异常弹窗 ({shot_p}): {texts}')
-                    beep(beep_on, 'warn' if has_risk else 'success')
+                    log(f'[成功] 检测到签到/成功页面 ({shot_p}): {texts}')
+                    beep(beep_on, 'success')
+                    break
+                if has_risk:
+                    shot_p = save_shot(arr, 'v2-spike')
+                    log(f'[熔断] 检测到风控/异常弹窗 ({shot_p}): {texts}')
+                    beep(beep_on, 'warn')
+                    break
+                if not on_seatmap:
+                    shot_p = save_shot(arr, 'v2-spike')
+                    log(f'[跳转] 已离开选座页（可能预约成功或跳转广告页，请查看微信确认）({shot_p}): {texts}')
+                    beep(beep_on, 'success')
                     break
 
             prev_empty_count = len(empties)
@@ -503,13 +544,17 @@ def main():
                     else:
                         shot_ng = save_shot(poll_arr if not wb.is_frame_blank(poll_arr) else arr, 'v2-notgreen', target)
                         log(f'  -> [未选中] 座位 {target} 未选中 (截图 {shot_ng}) texts={texts[:8]}')
+                        if has_success:
+                            log('[成功] 检测到签到/成功页面，停止！')
+                            beep(beep_on, 'success')
+                            break
                         if has_risk:
                             log('[熔断] 检测到风控/异常提示，立即停止！')
                             beep(beep_on, 'warn')
                             break
-                        if has_success or not on_seatmap:
-                            log('[熔断] 页面已跳转或完成，停止。')
-                            beep(beep_on, 'success' if has_success else 'warn')
+                        if not on_seatmap:
+                            log('[跳转] 已离开选座页（可能选座成功或跳转广告页，请查看微信确认），停止。')
+                            beep(beep_on, 'success')
                             break
 
                 if selected_ok:
@@ -537,12 +582,16 @@ def main():
                     texts, has_risk, has_success, on_seatmap = inspect_texts_status(uia, render_hwnd)
                     log(f'  -> [结果] 截图={shot_cf} on_seatmap={on_seatmap} texts={texts[:12]}')
 
+                    if has_success:
+                        log('[成功] 检测到签到/成功页面，选座成功！')
+                        beep(beep_on, 'success')
+                        break
                     if has_risk:
                         log('[熔断] 检测到风控/异常弹窗，立即停止！')
                         beep(beep_on, 'warn')
                         break
-                    if has_success or not on_seatmap:
-                        log('[成功/跳转] 已离开选座页或检测到成功提示，停止！')
+                    if not on_seatmap:
+                        log('[成功/跳转] 已离开选座页（可能已预约成功或弹出广告页，请查看微信确认），停止！')
                         beep(beep_on, 'success')
                         break
 

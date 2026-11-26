@@ -355,14 +355,20 @@ class GrabWorker:
 
                 if len(empties) >= 25 and prev_empty_count < 5:
                     texts, has_risk, has_success, on_seatmap = v2.inspect_texts_status(uia, render_hwnd)
-                    if has_risk or has_success or not on_seatmap:
+                    if has_success or has_risk or not on_seatmap:
                         shot_p = v2.save_shot(arr, 'v2-spike')
-                        self._log(f'[熔断] 页面状态变化或异常弹窗 ({shot_p}): {texts}', 'error' if has_risk else 'success')
-                        v2.beep(self.beep_enabled, 'warn' if has_risk else 'success')
-                        if has_risk:
+                        if has_success:
+                            self._log(f'[成功] 检测到签到/成功页面 ({shot_p}): {texts[:10]}', 'success')
+                            v2.beep(self.beep_enabled, 'success')
+                            finish_key, finish_text = 'stopped_success', '选座成功'
+                        elif has_risk:
+                            self._log(f'[熔断] 检测到风控/异常弹窗 ({shot_p}): {texts[:10]}', 'error')
+                            v2.beep(self.beep_enabled, 'warn')
                             finish_key, finish_text = 'stopped_risk', '已熔断停止'
                         else:
-                            finish_key, finish_text = 'stopped_success', '选座成功'
+                            self._log(f'[跳转] 已离开选座页（可能跳转广告或完成页，请确认）({shot_p}): {texts[:10]}', 'success')
+                            v2.beep(self.beep_enabled, 'success')
+                            finish_key, finish_text = 'stopped_success', '已离开选座页'
                         break
 
                 prev_empty_count = len(empties)
@@ -424,15 +430,20 @@ class GrabWorker:
                         else:
                             shot_ng = v2.save_shot(poll_arr if not wb.is_frame_blank(poll_arr) else arr, 'v2-notgreen', target)
                             self._log(f'  -> [未选中] 座位 {target} 未选中 (截图 {shot_ng}) texts={texts[:8]}', 'warn')
+                            if has_success:
+                                self._log('[成功] 检测到签到/成功页面，停止！', 'success')
+                                v2.beep(self.beep_enabled, 'success')
+                                finish_key, finish_text = 'stopped_success', '选座成功'
+                                break
                             if has_risk:
                                 self._log('[熔断] 检测到风控/异常提示，立即停止！', 'error')
                                 v2.beep(self.beep_enabled, 'warn')
                                 finish_key, finish_text = 'stopped_risk', '已熔断停止'
                                 break
-                            if has_success or not on_seatmap:
-                                self._log('[成功/跳转] 页面已跳转或完成，停止。', 'success')
-                                v2.beep(self.beep_enabled, 'success' if has_success else 'warn')
-                                finish_key, finish_text = 'stopped_success', '选座成功'
+                            if not on_seatmap:
+                                self._log('[跳转] 已离开选座页（可能预约成功或跳转广告页，请查看微信确认），停止。', 'success')
+                                v2.beep(self.beep_enabled, 'success')
+                                finish_key, finish_text = 'stopped_success', '已选座/跳转'
                                 break
 
                     if selected_ok:
@@ -462,17 +473,22 @@ class GrabWorker:
                         shot_cf = v2.save_shot(show_arr, 'v2-confirm', target)
                         self._emit('preview', show_arr, cache['seats_rel'], [], f'确认结果 · {shot_cf}')
                         texts, has_risk, has_success, on_seatmap = v2.inspect_texts_status(uia, render_hwnd)
-                        self._log(f'  -> [结果] 截图={shot_cf} on_seatmap={on_seatmap} texts={texts[:12]}', 'warn')
+                        self._log(f'  -> [结果] 截图={shot_cf} on_seatmap={on_seatmap} texts={texts[:12]}', 'success' if (has_success or not on_seatmap) and not has_risk else 'warn')
 
+                        if has_success:
+                            self._log('[成功] 检测到签到/成功页面，选座成功！', 'success')
+                            v2.beep(self.beep_enabled, 'success')
+                            finish_key, finish_text = 'stopped_success', '选座成功'
+                            break
                         if has_risk:
                             self._log('[熔断] 检测到风控/异常弹窗，立即停止！', 'error')
                             v2.beep(self.beep_enabled, 'warn')
                             finish_key, finish_text = 'stopped_risk', '已熔断停止'
                             break
-                        if has_success or not on_seatmap:
-                            self._log('[成功/跳转] 已离开选座页或检测到成功提示，停止！', 'success')
+                        if not on_seatmap:
+                            self._log('[成功/跳转] 已离开选座页（可能已预约成功或弹出广告页，请查看微信确认），停止！', 'success')
                             v2.beep(self.beep_enabled, 'success')
-                            finish_key, finish_text = 'stopped_success', '选座成功'
+                            finish_key, finish_text = 'stopped_success', '已选座/跳转'
                             break
 
                         consecutive_fails += 1
