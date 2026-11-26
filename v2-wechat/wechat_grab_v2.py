@@ -73,6 +73,8 @@ SUCCESS_KEYWORDS = (
     '预约成功',
     '已预约',
 )
+LEGEND_TEXTS = {'有人', '暂离', '监督', '可选', '已选', '入口'}
+STATIC_CHROME_TEXTS = {'\ue60e', '返回', '刷新', '请选择座位', '确认选座'} | LEGEND_TEXTS
 
 paused = False
 _key_state = {VK_F9: False, VK_F10: False}
@@ -169,6 +171,48 @@ def find_text_rect(texts, label):
     return None
 
 
+def filter_and_dedup_seats(seats, texts, browser_rect, confirm_rel=None):
+    """Filter out header/button false seat numbers and deduplicate seat entries."""
+    bx, by = int(browser_rect[0]), int(browser_rect[1])
+    legend_tops = []
+    for t in (texts or []):
+        if t.get('text') in LEGEND_TEXTS:
+            rect = t.get('rect')
+            if rect and len(rect) == 4:
+                legend_tops.append(int(rect[1]))
+    min_seat_y = (min(legend_tops) - by) if len(legend_tops) >= 2 else None
+    max_seat_y = (int(confirm_rel[1]) - 15) if confirm_rel else None
+
+    order = []
+    best = {}
+    for s in (seats or []):
+        sid = s.get('id')
+        rect = s.get('rect')
+        if not sid or not rect or len(rect) != 4:
+            continue
+        sx, sy = wb.rect_center(rect)
+        cx, cy = sx - bx, sy - by
+        if min_seat_y is not None and cy < min_seat_y:
+            continue
+        if max_seat_y is not None and cy > max_seat_y:
+            continue
+        area = max(1, (int(rect[2]) - int(rect[0])) * (int(rect[3]) - int(rect[1])))
+        entry = {'id': sid, 'cx': cx, 'cy': cy}
+        score = (area, -cy)
+        if sid not in best:
+            order.append(sid)
+            best[sid] = (score, entry)
+        elif score < best[sid][0]:
+            best[sid] = (score, entry)
+
+    return [best[sid][1] for sid in order]
+
+
+def extract_extra_texts(text_list):
+    """Return dynamic page texts excluding static UI chrome labels."""
+    return [t for t in text_list if t and t not in STATIC_CHROME_TEXTS]
+
+
 def scan_and_build_cache(uia, render_hwnd, browser_rect):
     res = uia.scan(render_hwnd)
     if not res.get('ok'):
@@ -196,13 +240,7 @@ def scan_and_build_cache(uia, render_hwnd, browser_rect):
         cx, cy = wb.rect_center(confirm_rect)
         confirm_rel = (cx - bx, cy - by)
 
-    seats_rel = []
-    for s in seats:
-        rect = s.get('rect')
-        if not rect or len(rect) != 4:
-            continue
-        sx, sy = wb.rect_center(rect)
-        seats_rel.append({'id': s['id'], 'cx': sx - bx, 'cy': sy - by})
+    seats_rel = filter_and_dedup_seats(seats, texts, browser_rect, confirm_rel=confirm_rel)
 
     cache = {
         'size': (bw, bh),
@@ -290,10 +328,12 @@ def pick_target_seat(empties, prefer_list):
     return random.choice(empties)
 
 
-def wait_after_refresh(browser_hwnd, seats_rel, expected_size):
+def wait_after_refresh(browser_hwnd, seats_rel, expected_size, baseline_unknown=None):
     """Wait until loading overlay clears and seats settle; return (arr, cur_rect, counts, empties)."""
     time.sleep(0.15)
-    deadline = time.time() + 2.5
+    t_start = time.time()
+    deadline = t_start + 2.5
+    settle_deadline = t_start + 0.85
     while True:
         arr, cur_rect, _ = wb.capture_browser(browser_hwnd)
         if wb.is_frame_blank(arr):
@@ -309,6 +349,13 @@ def wait_after_refresh(browser_hwnd, seats_rel, expected_size):
             # Timed out while loading overlay is still up: never emit false empties
             counts['empty'] = 0
             return arr, cur_rect, counts, []
+        if (
+            baseline_unknown is not None
+            and counts['unknown'] >= baseline_unknown + 8
+            and time.time() < settle_deadline
+        ):
+            time.sleep(0.06)
+            continue
         colored = (
             counts['occupied']
             + counts['selected']
@@ -333,7 +380,7 @@ def main():
     ap.add_argument('--click-method', choices=['render_doc', 'browser_client', 'uia_invoke'], default='render_doc')
     ap.add_argument('--prefer', default='', help='Comma-separated preferred seat numbers, e.g. 001,002')
     ap.add_argument('--minutes', type=float, default=120.0, help='Run duration in minutes (0 = unlimited)')
-    ap.add_argument('--rescan-every', type=int, default=30, help='Re-scan UIA layout every N rounds')
+    ap.add_argument('--rescan-every', type=int, default=0, help='Deprecated; layout rescans automatically on window resize')
     ap.add_argument('--no-beep', action='store_true', help='Disable alert beeps')
     args = ap.parse_args()
 
@@ -365,6 +412,9 @@ def main():
 
     uia = wb.UiaClient()
     cache = None
+    baseline_unknown = None
+    seat_cooldown = {}
+    last_fail_ts = 0.0
     last_warn_ts = 0.0
     last_empty_shot_ts = 0.0
     last_alert_beep_ts = 0.0
@@ -393,6 +443,7 @@ def main():
                 render_hwnd = wins['render_hwnd']
                 browser_rect = wins['browser_rect']
                 cache = None
+                baseline_unknown = None
 
             wins_now = wb.find_wechat_windows() if not browser_hwnd else {
                 'is_minimized': bool(wb.user32.IsIconic(wb.user32.GetAncestor(browser_hwnd, wb.GA_ROOT) or browser_hwnd)),
@@ -410,7 +461,6 @@ def main():
             need_scan = (
                 cache is None
                 or cache['size'] != cur_size
-                or (args.rescan_every > 0 and round_no > 0 and round_no % args.rescan_every == 0)
             )
             if need_scan:
                 new_cache, err = scan_and_build_cache(uia, render_hwnd, browser_rect)
@@ -429,6 +479,7 @@ def main():
                     sleep_with_hotkeys(1.5)
                     continue
                 cache = new_cache
+                baseline_unknown = None
                 if round_no == 0:
                     log(
                         f'[就绪] 座位={len(cache["seats_rel"])} 个, '
@@ -449,7 +500,12 @@ def main():
                 args.click_method,
                 jitter=3,
             )
-            arr, cur_rect, counts, empties = wait_after_refresh(browser_hwnd, cache['seats_rel'], cache['size'])
+            arr, cur_rect, counts, empties = wait_after_refresh(
+                browser_hwnd,
+                cache['seats_rel'],
+                cache['size'],
+                baseline_unknown=baseline_unknown,
+            )
             if wb.is_frame_blank(arr):
                 if time.time() - last_warn_ts >= 10.0:
                     log('[等待] 后台截图为空白（可能窗口刚最小化或重建），等待恢复...')
@@ -459,7 +515,14 @@ def main():
 
             if counts is None or (cur_rect[2] - cur_rect[0], cur_rect[3] - cur_rect[1]) != cache['size']:
                 cache = None
+                baseline_unknown = None
                 continue
+
+            if counts['unknown'] < max(15, len(cache['seats_rel']) // 3):
+                baseline_unknown = (
+                    counts['unknown'] if baseline_unknown is None
+                    else min(baseline_unknown, counts['unknown'])
+                )
 
             elapsed_ms = int((time.time() - t_round) * 1000)
             empty_preview = f' 编号={empties[:6]}' if empties else ''
@@ -503,23 +566,29 @@ def main():
                     log(f'  [发现空座] {empties}')
 
             elif empties and args.mode == 'live':
+                now_ts = time.time()
+                live_empties = [sid for sid in empties if seat_cooldown.get(sid, 0.0) <= now_ts]
+                if not live_empties:
+                    log(f'  -> [冷却中] 空座 {empties[:6]} 刚抢失败仍在冷却内，跳过')
+                    sleep_with_hotkeys(random.uniform(args.interval_min, args.interval_max))
+                    continue
                 time.sleep(0.08)
                 arr2, cur_rect2, _ = wb.capture_browser(browser_hwnd)
                 if not wb.is_frame_blank(arr2) and (cur_rect2[2] - cur_rect2[0], cur_rect2[3] - cur_rect2[1]) == cache['size']:
                     _, _, empties2 = wb.classify_all_seats(arr2, cur_rect2, cache['seats_rel'])
                     empties2_set = set(empties2)
-                    confirmed = [sid for sid in empties if sid in empties2_set]
+                    confirmed = [sid for sid in live_empties if sid in empties2_set]
                     if not confirmed:
-                        log(f'  -> [跳过] 二次帧确认无空座（刷新闪烁过滤，原={empties[:6]}）')
+                        log(f'  -> [跳过] 二次帧确认无空座（刷新闪烁过滤，原={live_empties[:6]}）')
                         sleep_with_hotkeys(random.uniform(args.interval_min, args.interval_max))
                         continue
-                    empties = confirmed
+                    live_empties = confirmed
                     arr = arr2
                     cur_rect = cur_rect2
 
-                target = pick_target_seat(empties, prefer_list)
+                target = pick_target_seat(live_empties, prefer_list)
                 shot_found = save_shot(arr, 'v2-found', target)
-                log(f'  -> [抢座] 目标={target} 空座共{len(empties)}个 (截图 {shot_found})')
+                log(f'  -> [抢座] 目标={target} 空座共{len(live_empties)}个 (截图 {shot_found})')
 
                 click_seat(uia, browser_hwnd, render_hwnd, cur_rect, cache, target, args.click_method)
 
@@ -580,7 +649,8 @@ def main():
                     after_arr, _, _ = wb.capture_browser(browser_hwnd)
                     shot_cf = save_shot(after_arr if not wb.is_frame_blank(after_arr) else arr, 'v2-confirm', target)
                     texts, has_risk, has_success, on_seatmap = inspect_texts_status(uia, render_hwnd)
-                    log(f'  -> [结果] 截图={shot_cf} on_seatmap={on_seatmap} texts={texts[:12]}')
+                    extra_texts = extract_extra_texts(texts)
+                    log(f'  -> [结果] 截图={shot_cf} on_seatmap={on_seatmap} texts={extra_texts[:12] if extra_texts else texts[:12]}')
 
                     if has_success:
                         log('[成功] 检测到签到/成功页面，选座成功！')
@@ -595,13 +665,18 @@ def main():
                         beep(beep_on, 'success')
                         break
 
+                    seat_cooldown[target] = time.time() + 15.0
+                    now_fail = time.time()
+                    if last_fail_ts > 0 and (now_fail - last_fail_ts) > 180.0:
+                        consecutive_fails = 0
                     consecutive_fails += 1
+                    last_fail_ts = now_fail
                     if consecutive_fails >= 3:
                         paused = True
                         log('[熔断] 连续 3 次选座未成功，已自动暂停保护账号（按 F10 可恢复）。')
                         beep(beep_on, 'warn')
                         continue
-                    log(f'  -> [继续] 座位可能已被抢（连续未成功 {consecutive_fails}/3），冷却 1.5s 后继续')
+                    log(f'  -> [继续] 座位 {target} 可能已被抢（连续未成功 {consecutive_fails}/3，15s 内暂不重抢该座），冷却 1.5s 后继续')
                     sleep_with_hotkeys(1.5)
                     continue
 

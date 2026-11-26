@@ -467,12 +467,22 @@ def classify_seat_patch(img, cx, cy):
     return 'unknown'
 
 
+_STATE_PRIORITY = {
+    'unknown': 0,
+    'empty': 1,
+    'away': 2,
+    'supervise': 2,
+    'occupied': 2,
+    'selected': 2,
+    'picked': 2,
+}
+
+
 def classify_all_seats(img, browser_rect, seats):
     """Classify all seats using cached browser-relative or screen-coord centers."""
     bx, by = int(browser_rect[0]), int(browser_rect[1])
     states = {}
     counts = {'occupied': 0, 'selected': 0, 'picked': 0, 'supervise': 0, 'away': 0, 'empty': 0, 'unknown': 0}
-    empties = []
 
     for seat in seats:
         sid = seat['id']
@@ -482,7 +492,11 @@ def classify_all_seats(img, browser_rect, seats):
             sx, sy = rect_center(seat['rect'])
             cx, cy = sx - bx, sy - by
         st = classify_seat_patch(img, cx, cy)
-        states[sid] = st
+        if sid not in states or _STATE_PRIORITY.get(st, 0) > _STATE_PRIORITY.get(states[sid], 0):
+            states[sid] = st
+
+    empties = []
+    for sid, st in states.items():
         counts[st] += 1
         if st == 'empty':
             empties.append(sid)

@@ -214,6 +214,9 @@ class GrabWorker:
 
         uia = None
         cache = None
+        baseline_unknown = None
+        seat_cooldown = {}
+        last_fail_ts = 0.0
         last_warn_ts = 0.0
         last_empty_shot_ts = 0.0
         last_alert_beep_ts = 0.0
@@ -243,6 +246,7 @@ class GrabWorker:
                     render_hwnd = wins['render_hwnd']
                     browser_rect = wins['browser_rect']
                     cache = None
+                    baseline_unknown = None
 
                 if not browser_hwnd or not render_hwnd:
                     self._emit('conn', '未检测到微信小窗', 'error')
@@ -267,7 +271,6 @@ class GrabWorker:
                 need_scan = (
                     cache is None
                     or cache['size'] != cur_size
-                    or (round_no > 0 and round_no % 30 == 0)
                 )
                 if need_scan:
                     new_cache, err = v2.scan_and_build_cache(uia, render_hwnd, browser_rect)
@@ -289,6 +292,7 @@ class GrabWorker:
                         self._sleep(1.5)
                         continue
                     cache = new_cache
+                    baseline_unknown = None
                     occ_now = wb.is_window_occluded(browser_hwnd)
                     occ_label = '后台遮挡' if occ_now else '前台可见'
                     self._emit('conn', f'已连接 · {len(cache["seats_rel"])}座 ({occ_label})', 'ok')
@@ -318,6 +322,7 @@ class GrabWorker:
                     browser_hwnd,
                     cache['seats_rel'],
                     cache['size'],
+                    baseline_unknown=baseline_unknown,
                 )
                 if self._stop_event.is_set():
                     break
@@ -332,7 +337,14 @@ class GrabWorker:
 
                 if counts is None or (cur_rect[2] - cur_rect[0], cur_rect[3] - cur_rect[1]) != cache['size']:
                     cache = None
+                    baseline_unknown = None
                     continue
+
+                if counts['unknown'] < max(15, len(cache['seats_rel']) // 3):
+                    baseline_unknown = (
+                        counts['unknown'] if baseline_unknown is None
+                        else min(baseline_unknown, counts['unknown'])
+                    )
 
                 elapsed_ms = int((time.time() - t_round) * 1000)
                 self._emit('stats', round_no, elapsed_ms, counts, empties)
@@ -386,24 +398,30 @@ class GrabWorker:
                         self._log(f'  [发现空座] {empties}', 'empty')
 
                 elif empties and mode == 'live':
+                    now_ts = time.time()
+                    live_empties = [sid for sid in empties if seat_cooldown.get(sid, 0.0) <= now_ts]
+                    if not live_empties:
+                        self._log(f'  -> [冷却中] 空座 {empties[:6]} 刚抢失败仍在冷却内，跳过', 'warn')
+                        self._sleep(random.uniform(imin, imax))
+                        continue
                     if not self._sleep(0.08, respect_pause=False):
                         break
                     arr2, cur_rect2, _ = wb.capture_browser(browser_hwnd)
                     if not wb.is_frame_blank(arr2) and (cur_rect2[2] - cur_rect2[0], cur_rect2[3] - cur_rect2[1]) == cache['size']:
                         _, _, empties2 = wb.classify_all_seats(arr2, cur_rect2, cache['seats_rel'])
                         e2_set = set(empties2)
-                        confirmed = [sid for sid in empties if sid in e2_set]
+                        confirmed = [sid for sid in live_empties if sid in e2_set]
                         if not confirmed:
-                            self._log(f'  -> [跳过] 二次帧确认无空座（刷新闪烁过滤，原={empties[:6]}）', 'warn')
+                            self._log(f'  -> [跳过] 二次帧确认无空座（刷新闪烁过滤，原={live_empties[:6]}）', 'warn')
                             self._sleep(random.uniform(imin, imax))
                             continue
-                        empties = confirmed
+                        live_empties = confirmed
                         arr = arr2
                         cur_rect = cur_rect2
 
-                    target = v2.pick_target_seat(empties, prefer_list)
+                    target = v2.pick_target_seat(live_empties, prefer_list)
                     shot_found = v2.save_shot(arr, 'v2-found', target)
-                    self._log(f'  -> [抢座] 目标={target} 空座共{len(empties)}个 (截图 {shot_found})', 'empty')
+                    self._log(f'  -> [抢座] 目标={target} 空座共{len(live_empties)}个 (截图 {shot_found})', 'empty')
 
                     v2.click_seat(uia, browser_hwnd, render_hwnd, cur_rect, cache, target, click_method)
 
@@ -473,7 +491,8 @@ class GrabWorker:
                         shot_cf = v2.save_shot(show_arr, 'v2-confirm', target)
                         self._emit('preview', show_arr, cache['seats_rel'], [], f'确认结果 · {shot_cf}')
                         texts, has_risk, has_success, on_seatmap = v2.inspect_texts_status(uia, render_hwnd)
-                        self._log(f'  -> [结果] 截图={shot_cf} on_seatmap={on_seatmap} texts={texts[:12]}', 'success' if (has_success or not on_seatmap) and not has_risk else 'warn')
+                        extra_texts = v2.extract_extra_texts(texts)
+                        self._log(f'  -> [结果] 截图={shot_cf} on_seatmap={on_seatmap} texts={extra_texts[:12] if extra_texts else texts[:12]}', 'success' if (has_success or not on_seatmap) and not has_risk else 'warn')
 
                         if has_success:
                             self._log('[成功] 检测到签到/成功页面，选座成功！', 'success')
@@ -491,14 +510,19 @@ class GrabWorker:
                             finish_key, finish_text = 'stopped_success', '已选座/跳转'
                             break
 
+                        seat_cooldown[target] = time.time() + 15.0
+                        now_fail = time.time()
+                        if last_fail_ts > 0 and (now_fail - last_fail_ts) > 180.0:
+                            consecutive_fails = 0
                         consecutive_fails += 1
+                        last_fail_ts = now_fail
                         if consecutive_fails >= 3:
                             self._pause_event.set()
                             self._emit('status', 'paused', '已暂停 (连续失败保护)')
                             self._log('[熔断] 连续 3 次选座未成功，已自动暂停保护账号（按 F10 或点击继续可恢复）。', 'error')
                             v2.beep(self.beep_enabled, 'warn')
                             continue
-                        self._log(f'  -> [继续] 座位可能已被抢（连续未成功 {consecutive_fails}/3），冷却 1.5s 后继续', 'warn')
+                        self._log(f'  -> [继续] 座位 {target} 可能已被抢（连续未成功 {consecutive_fails}/3，15s 内暂不重抢该座），冷却 1.5s 后继续', 'warn')
                         self._sleep(1.5)
                         continue
 
