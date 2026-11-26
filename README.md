@@ -31,7 +31,7 @@
 ### 方式 A：小白免安装版（推荐，不用装 Python）
 
 1. **下载压缩包**：
-   - 前往 Releases 下载 **[seat-grabber-v2.0.0-win-x64.zip](https://github.com/Moonlight-1210/Igolibrary-Simulated_click/releases/download/v2.0.0/seat-grabber-v2.0.0-win-x64.zip)**
+   - 前往 Releases 下载 **[seat-grabber-v2.0.1-win-x64.zip](https://github.com/Moonlight-1210/Igolibrary-Simulated_click/releases/download/v2.0.1/seat-grabber-v2.0.1-win-x64.zip)**
    - **一定要先全部解压到一个普通文件夹**（不要直接在压缩包预览窗口里双击运行）。
 2. **微信打开座位图**：
    - 打开电脑版微信（3.9 或 4.x 都行）并登录；
