@@ -26,9 +26,9 @@
 
 ---
 
-## 二、v2 小白傻瓜式使用教程（推荐）
+## 二、v2 使用教程（推荐）
 
-### 方式 A：小白免安装版（推荐，不用装 Python）
+### 方式 A：免安装版（推荐，不用装 Python）
 
 1. **下载压缩包**：
    - 前往 Releases 下载 **[seat-grabber-v2.0.2-win-x64.zip](https://github.com/Moonlight-1210/Igolibrary-Simulated_click/releases/download/v2.0.2/seat-grabber-v2.0.2-win-x64.zip)**
@@ -63,7 +63,7 @@
 
 ---
 
-### 三、小白常见问题（FAQ）
+### 三、常见问题（FAQ）
 
 1. **顶部一直显示「未检测到微信小窗」怎么办？**
    - 确认你已经在电脑微信里点开了图书馆网页，并且停在能看到座位图的页面；
